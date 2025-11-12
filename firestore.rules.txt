@@ -1,0 +1,71 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() { return request.auth != null; }
+    function uid() { return request.auth.uid; }
+
+    // Users document should store role {owner|employee}
+    function myRole() {
+      return get(/databases/$(database)/documents/users/$(uid())).data.role;
+    }
+
+    function isOwner() { return myRole() == 'owner'; }
+    function isEmployee() { return myRole() == 'employee'; }
+
+    match /users/{userId} {
+      allow read: if isSignedIn() && (isOwner() || userId == uid());
+      allow write: if isOwner();
+    }
+
+    match /clients/{id} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isOwner();
+    }
+
+    match /taskNameLibrary/{id} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isOwner();
+    }
+
+    match /calendarRules/{id} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isOwner();
+    }
+
+    match /fyPeriods/{id} {
+      allow read: if isSignedIn();
+      allow write: if isOwner();
+    }
+
+    match /tasks/{taskId} {
+      allow read: if isSignedIn();
+
+      // Create: both Owner and Employee can add tasks
+      allow create: if isSignedIn();
+
+      // Update:
+      // - Owner: full edit
+      // - Employee: cannot change dueDate, assignedToUserId, softDeletedAt, or delete
+      allow update: if isSignedIn() && (
+        isOwner() ||
+        (
+          isEmployee() &&
+          request.resource.data.status in ['todo','done'] &&
+          request.resource.data.dueDate == resource.data.dueDate &&
+          request.resource.data.assignedToUserId == resource.data.assignedToUserId &&
+          request.resource.data.softDeletedAt == resource.data.softDeletedAt
+        )
+      );
+
+      // Soft delete: Owner only
+      allow delete: if isOwner();
+    }
+
+    match /audit/{id} {
+      allow read: if isOwner();
+      allow write: if isOwner(); // or via Cloud Function
+    }
+  }
+}
